@@ -1,0 +1,191 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+contract MyNFTFromScratch is IERC721, IERC165 {
+    
+    // Nama Token
+    string private _name;
+    // Simbol Token
+    string private _symbol;
+
+    // Mapping dari Token ID ke alamat pemilik
+    mapping(uint256 => address) private _owners;
+
+    // Mapping dari alamat ke jumlah NFT yang dimiliki
+    mapping(address => uint256) private _balances;
+
+    // kisah nya alamat metadata api dari gambar
+    mapping(uint256 => string) private _tokenURIs;
+
+
+    mapping(uint256 => address) private _tokenApprovals;
+    mapping(address => mapping(address => bool)) private _operatorApprovals;
+
+    constructor(string memory name_, string memory symbol_) {
+        _name = name_;
+        _symbol = symbol_;
+    }
+
+    function name() public view virtual returns (string memory) {
+        return _name;
+    }
+
+    function symbol() public view virtual returns (string memory) {
+        return _symbol;
+    }
+
+    // check balances dari owner
+    function balanceOf(address owner) public view virtual returns (uint256) {
+        require(owner != address(0), "ERC721: address zero is not a valid owner");
+        return _balances[owner];
+    }
+
+    // untuk ngecheck siapa pemilik token nya
+    function ownerOf(uint256 tokenId) public view virtual returns (address) {
+        address owner = _owners[tokenId];
+        require(owner != address(0), "ERC721: invalid token ID");
+        return owner;
+    }
+
+    //check token x itu di approve gak? beneran ada ga
+    function getApproved(uint256 tokenId) public view virtual returns (address) {
+        require(_exists(tokenId), "ERC721: invalid token ID");
+        return _tokenApprovals[tokenId];
+    }
+
+    // check si operator, kayak opensea dkk itu dapet approval owner gak buat manage token nya
+    function isApprovedForAll(address owner, address operator) public view virtual returns (bool) {
+        return _operatorApprovals[owner][operator];
+    }
+
+    // ngasih approval kalau gak owner yang approve ya opensea nya
+    function approve(address to, uint256 tokenId) public virtual {
+        address owner = ownerOf(tokenId);
+        
+        // Pengecekan: Yang panggil fungsi ini (msg.sender) harus 'owner'
+        // ATAU 'operator' yang sudah di-approve
+        require(
+            to != owner, // ini make sure kita approve gak ke orang yang sama
+            "ERC721: approval to current owner"
+        );
+        require(
+            msg.sender == owner || isApprovedForAll(owner, msg.sender), //ini ngecheck kalau yang mau approve bener bener dari owner asli atau yang approve itu si open sea dengan izin dari owner sebelum nya
+            "ERC721: approve caller is not owner nor approved for all"
+        );
+
+        _tokenApprovals[tokenId] = to;
+        emit Approval(owner, to, tokenId);
+    }
+
+    // ngasih approve ke operator
+    function setApprovalForAll(address operator, bool approved) public virtual {
+        require(operator != msg.sender, "ERC721: approve to caller");
+        
+        _operatorApprovals[msg.sender][operator] = approved;
+        emit ApprovalForAll(msg.sender, operator, approved);
+    }
+
+   // transfer from
+    function transferFrom(
+        address from,
+        address to,
+        uint256 tokenId
+    ) public virtual {
+        // Cek apakah 'from' adalah pemilik asli
+        require(ownerOf(tokenId) == from, "ERC721: transfer from incorrect owner");
+        // Cek 'to' bukan alamat 0 (alamat burn)
+        require(to != address(0), "ERC721: transfer to the zero address");
+
+        // Cek apakah 'msg.sender' (yang memanggil) punya izin
+        require(
+            _isApprovedOrOwner(msg.sender, tokenId),
+            "ERC721: transfer caller is not owner nor approved"
+        );
+
+    
+        // mulai transfer
+        // 1. Hapus approval untuk token ini (karena sudah pindah tangan)
+        delete _tokenApprovals[tokenId];
+
+        // 2. Kurangi saldo 'from'
+        _balances[from] -= 1;
+
+        // 3. Tambah saldo 'to'
+        _balances[to] += 1;
+
+        // 4. Pindahkan kepemilikan 
+        _owners[tokenId] = to;
+
+        // 5. Beri notifikasi ke event
+        emit Transfer(from, to, tokenId);
+    }
+
+  
+    function safeTransferFrom(
+        address from,
+        address to,
+        uint256 tokenId
+    ) public virtual {
+        // harus nya disini ada something secure di library, tapi nanti manggil fungsi transfer
+        transferFrom(from, to, tokenId);
+    }
+
+    function safeTransferFrom(
+        address from,
+        address to,
+        uint256 tokenId,
+        bytes memory data
+    ) public virtual {
+       // ini ada versi lain tapi dia + ngirim data
+        transferFrom(from, to, tokenId);
+    }
+
+
+    // yang ini helper
+    function _mint(address to, uint256 tokenId) internal virtual {
+        // Cek 'to' bukan alamat 0
+        require(to != address(0), "ERC721: mint to the zero address");
+        // Cek token ID belum ada pemiliknya
+        require(!_exists(tokenId), "ERC721: token already minted");
+        _balances[to] += 1;
+        _owners[tokenId] = to;
+        emit Transfer(address(0), to, tokenId);
+    }
+
+    // check token udah exists belum? ini tapi helper
+    function _exists(uint256 tokenId) internal view returns (bool) {
+        return _owners[tokenId] != address(0);
+    }
+
+    // ini helper juga, apakah bener di approve apa enggak
+    function _isApprovedOrOwner(address spender, uint256 tokenId) internal view returns (bool) {
+        address owner = ownerOf(tokenId);
+        return (
+            spender == owner ||
+            getApproved(tokenId) == spender ||
+            isApprovedForAll(owner, spender)
+        );
+    }
+
+    // ini gak masuk tapi fungsi nya buat support interface dengan ierc 721 dan 165 (karena aslinya ada kaitan NFT ke ERC 165
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
+        return
+            interfaceId == type(IERC721).interfaceId ||
+            interfaceId == type(IERC165).interfaceId;
+    }
+
+
+    // get TokenUri
+    function tokenURI(uint256 tokenId) public view virtual returns (string memory) {
+        require(_exists(tokenId), "ERC721: invalid token ID");
+        return _tokenURIs[tokenId];
+    }
+
+    // Fungsi helper untuk set URI 
+    function _setTokenURI(uint256 tokenId, string memory uri) internal {
+        _tokenURIs[tokenId] = uri;
+    }
+}
